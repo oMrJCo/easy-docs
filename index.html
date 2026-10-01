@@ -20,13 +20,47 @@
 <div id="deleteDocModal" class="modal" onclick="if(event.target===this)closeDeleteDocModal()"><div class="modalbox" style="width:min(460px,100%)"><div class="modalbar"><b>ยืนยันการลบเอกสาร</b></div><div class="editbox"><p id="deleteDocText" style="margin-top:0"></p><p class="muted">การลบนี้จะลบเฉพาะเอกสาร ลูกค้าในฐานข้อมูลจะยังอยู่</p><div class="edit-actions"><button class="btn" onclick="closeDeleteDocModal()">ยกเลิก</button><button class="btn primary" onclick="confirmDeleteDocument()">ลบเอกสาร</button></div></div></div></div>
 <div id="previewModal" class="modal" onclick="if(event.target===this)closePreview()"><div class="modalbox"><div class="modalbar no-print"><b>ดูเอกสาร</b><div><button class="btn smallbtn" onclick="closePreview()">ปิด</button> <button class="btn primary smallbtn" onclick="printPreview()">พิมพ์ / บันทึก PDF</button></div></div><div id="paper" class="paper"></div></div></div>
 <script>
-const $=id=>document.getElementById(id), money=n=>'฿'+Number(n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});let docs=JSON.parse(localStorage.getItem('easy_docs')||'[]');let editingDocIndex=null;let editingCustomerIndex=null;let deletingCustomerIndex=null;let deletingDocIndex=null;let customers=JSON.parse(localStorage.getItem('easy_customers')||'[]');if(!customers.length){customers=[...new Map(docs.filter(x=>x.cust).map(x=>[x.cust,{name:x.cust,taxid:x.taxid||'',addr:x.addr||''}])).values()];localStorage.setItem('easy_customers',JSON.stringify(customers))}
+const $=id=>document.getElementById(id), money=n=>'฿'+Number(n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const SUPABASE_URL='https://dxlngxkuggbgdzmithzx.supabase.co';
+const SUPABASE_KEY='sb_publishable_sqAwuko-g-Kgzp51YyMT3g_gIAwtEan';
+const SB_HEADERS={'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'};
+let cloudReady=false,cloudTimer=null;
+async function cloudLoad(){
+  try{
+    const r=await fetch(SUPABASE_URL+'/rest/v1/doc_app_state?id=eq.main&select=docs,customers,settings',{headers:SB_HEADERS});
+    if(!r.ok)throw new Error('cloud '+r.status);
+    const a=await r.json(),s=a[0];
+    if(s){
+      const localDocs=JSON.parse(localStorage.getItem('easy_docs')||'[]');
+      const localCustomers=JSON.parse(localStorage.getItem('easy_customers')||'[]');
+      const localSettings=JSON.parse(localStorage.getItem('easy_settings')||'{}');
+      const remoteEmpty=(!s.docs||!s.docs.length)&&(!s.customers||!s.customers.length)&&(!s.settings||!Object.keys(s.settings).length);
+      if(remoteEmpty&&(localDocs.length||localCustomers.length||Object.keys(localSettings).length)){
+        docs=localDocs;customers=localCustomers;await cloudSaveNow();
+      }else{
+        docs=Array.isArray(s.docs)?s.docs:[];
+        customers=Array.isArray(s.customers)?s.customers:[];
+        localStorage.setItem('easy_docs',JSON.stringify(docs));
+        localStorage.setItem('easy_customers',JSON.stringify(customers));
+        localStorage.setItem('easy_settings',JSON.stringify(s.settings||{}));
+      }
+    }
+    cloudReady=true;loadSettings();render();renderCustomerSelect();nextNo();
+  }catch(e){console.error(e);cloudReady=false;}
+}
+async function cloudSaveNow(){
+  const settings=JSON.parse(localStorage.getItem('easy_settings')||'{}');
+  const r=await fetch(SUPABASE_URL+'/rest/v1/doc_app_state?id=eq.main',{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({docs,customers,settings,updated_at:new Date().toISOString()})});
+  if(!r.ok)throw new Error('cloud save '+r.status);
+}
+function cloudSave(){clearTimeout(cloudTimer);cloudTimer=setTimeout(()=>cloudSaveNow().catch(console.error),120);}
+let docs=JSON.parse(localStorage.getItem('easy_docs')||'[]');let editingDocIndex=null;let editingCustomerIndex=null;let deletingCustomerIndex=null;let deletingDocIndex=null;let customers=JSON.parse(localStorage.getItem('easy_customers')||'[]');if(!customers.length){customers=[...new Map(docs.filter(x=>x.cust).map(x=>[x.cust,{name:x.cust,taxid:x.taxid||'',addr:x.addr||''}])).values()];localStorage.setItem('easy_customers',JSON.stringify(customers))}
 const names={dash:['ภาพรวม','สรุปเอกสารและยอดล่าสุด'],create:['สร้างเอกสาร','ใบเสนอราคา • ใบเรียกเก็บเงิน • ใบเสร็จ'],docs:['เอกสารทั้งหมด','ค้นหาและเรียกดูเอกสารย้อนหลัง'],customers:['ลูกค้า','ฐานข้อมูลลูกค้าจากเอกสาร'],settings:['ตั้งค่ากิจการ','ข้อมูลที่ใช้บนหัวเอกสาร']};
 function show(v){document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));$(v).classList.add('active');document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.v===v));$('title').textContent=names[v][0];$('sub').textContent=names[v][1];if(v==='dash'||v==='docs'||v==='customers')render()};document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>show(b.dataset.v));
 function nextNo(){let p=$('dtype').value;let d=new Date(), ym=String(d.getFullYear()+543).slice(-2)+String(d.getMonth()+1).padStart(2,'0');let n=docs.filter(x=>x.no.startsWith(p+'-'+ym)).length+1;$('docno').value=`${p}-${ym}-${String(n).padStart(4,'0')}`};$('dtype').onchange=nextNo;
 function addRow(desc='',qty=1,price=0){let tr=document.createElement('tr');tr.innerHTML=`<td></td><td><input class="desc" value="${desc}"></td><td><input class="qty" type="number" min="0" value="${qty}"></td><td><input class="price" type="number" min="0" value="${price}"></td><td class="right line">฿0.00</td><td class="no-print"><button class="btn" style="padding:5px 8px">×</button></td>`;tr.querySelectorAll('input').forEach(i=>i.oninput=calc);tr.querySelector('button').onclick=()=>{tr.remove();calc()};$('itembody').appendChild(tr);calc()}
 function calc(){let sub=0;[...$('itembody').children].forEach((tr,i)=>{tr.cells[0].textContent=i+1;let v=(+tr.querySelector('.qty').value||0)*(+tr.querySelector('.price').value||0);sub+=v;tr.querySelector('.line').textContent=money(v)});let dis=+$('discount').value||0, base=Math.max(0,sub-dis), va=base*(+$('vat').value/100), wh=base*(+$('wht').value/100), grand=base+va-wh;$('subtotal').textContent=money(sub);$('vatamt').textContent=money(va);$('whtamt').textContent=money(wh);$('grand').textContent=money(grand);return {sub,dis,va,wh,grand}}
-function saveDoc(){if(!$('cust').value.trim())return alert('กรุณาเลือกลูกค้าหรือเพิ่มลูกค้าใหม่');saveCustomerFromForm();let c=calc(),items=[...$('itembody').children].map(tr=>({desc:tr.querySelector('.desc').value,qty:+tr.querySelector('.qty').value,price:+tr.querySelector('.price').value})).filter(x=>x.desc);let d={no:$('docno').value,type:$('dtype').value,cust:$('cust').value,taxid:$('taxid').value,addr:$('addr').value,date:$('date').value,credit:$('credit').value,note:$('note').value,items,...c,vat:+$('vat').value,wht:+$('wht').value};if(editingDocIndex!==null){docs[editingDocIndex]=d}else{docs.unshift(d)}localStorage.setItem('easy_docs',JSON.stringify(docs));alert(editingDocIndex!==null?'บันทึกการแก้ไขแล้ว':'บันทึกเอกสารแล้ว');editingDocIndex=null;resetDoc();render();show('docs')}
+function saveDoc(){if(!$('cust').value.trim())return alert('กรุณาเลือกลูกค้าหรือเพิ่มลูกค้าใหม่');saveCustomerFromForm();let c=calc(),items=[...$('itembody').children].map(tr=>({desc:tr.querySelector('.desc').value,qty:+tr.querySelector('.qty').value,price:+tr.querySelector('.price').value})).filter(x=>x.desc);let d={no:$('docno').value,type:$('dtype').value,cust:$('cust').value,taxid:$('taxid').value,addr:$('addr').value,date:$('date').value,credit:$('credit').value,note:$('note').value,items,...c,vat:+$('vat').value,wht:+$('wht').value};if(editingDocIndex!==null){docs[editingDocIndex]=d}else{docs.unshift(d)}localStorage.setItem('easy_docs',JSON.stringify(docs));cloudSave();alert(editingDocIndex!==null?'บันทึกการแก้ไขแล้ว':'บันทึกเอกสารแล้ว');editingDocIndex=null;resetDoc();render();show('docs')}
 function resetDoc(){editingDocIndex=null;$('cust').value=$('taxid').value=$('addr').value=$('note').value='';$('custSelect').style.display='block';$('newCustWrap').style.display='none';$('custSelect').value='';$('discount').value=0;$('vat').value=$('wht').value='0';$('itembody').innerHTML='';addRow();nextNo()}
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function render(){let type={QT:'ใบเสนอราคา',BL:'ใบเรียกเก็บเงิน',RC:'ใบเสร็จรับเงิน'};$('kq').textContent=docs.filter(x=>x.type==='QT').length;$('ka').textContent=money(docs.filter(x=>x.type==='QT').reduce((s,x)=>s+x.grand,0));$('kp').textContent=money(docs.filter(x=>x.type==='RC').reduce((s,x)=>s+x.grand,0));let cs=customers;$('kc').textContent=cs.length;let row=(x,i,action=false)=>`<tr><td><button class="doclink" onclick="previewSaved(${i})">${esc(x.no)}</button></td><td>${type[x.type]||x.type}</td><td>${esc(x.cust)}</td><td>${esc(x.date||'-')}</td><td class="right">${money(x.grand)}</td><td>${action?`<button class="btn smallbtn" onclick="previewSaved(${i})">ดูเอกสาร</button> <button class="btn smallbtn" onclick="editDocument(${i})">แก้ไข</button> <button class="btn smallbtn" onclick="deleteDocument(${i})">ลบ</button>`:'<span class="badge">บันทึกแล้ว</span>'}</td></tr>`;$('recent').innerHTML=docs.slice(0,6).map((x)=>row(x,docs.indexOf(x))).join('')||'<tr><td colspan="6" class="muted">ยังไม่มีเอกสาร</td></tr>';$('allDocs').innerHTML=docs.map((x,i)=>row(x,i,true)).join('')||'<tr><td colspan="6" class="muted">ยังไม่มีเอกสาร</td></tr>';$('custList').innerHTML=cs.map((x,i)=>`<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.taxid||'-')}</td><td>${esc(x.addr||'-')}</td><td><button class="btn smallbtn" onclick="editCustomer(${i})">แก้ไข</button> <button class="btn smallbtn" onclick="deleteCustomer(${i})">ลบ</button></td></tr>`).join('');renderCustomerSelect();}
@@ -34,20 +68,20 @@ function render(){let type={QT:'ใบเสนอราคา',BL:'ใบเร
 function renderCustomerSelect(){let s=$('custSelect');if(!s)return;let cur=s.value;s.innerHTML='<option value="">— เลือกลูกค้า —</option>'+customers.map((c,i)=>`<option value="${i}">${esc(c.name)}</option>`).join('')+'<option value="__new__">+ เพิ่มลูกค้าใหม่</option>';if(cur!=="__new__"&&customers[cur])s.value=cur}
 function selectCustomer(){let v=$('custSelect').value;if(v==='__new__'){$('custSelect').style.display='none';$('newCustWrap').style.display='flex';$('cust').value='';$('taxid').value='';$('addr').value='';$('cust').focus();return}if(v==='')return;let c=customers[+v];if(!c)return;$('cust').value=c.name||'';$('taxid').value=c.taxid||'';$('addr').value=c.addr||''}
 function backToCustomerSelect(){$('newCustWrap').style.display='none';$('custSelect').style.display='block';$('custSelect').value='';$('cust').value='';$('taxid').value='';$('addr').value=''}
-function saveCustomerFromForm(){let name=$('cust').value.trim();if(!name)return;let i=customers.findIndex(c=>c.name.trim().toLowerCase()===name.toLowerCase());let c={name,taxid:$('taxid').value.trim(),addr:$('addr').value.trim()};if(i>=0)customers[i]=c;else customers.push(c);localStorage.setItem('easy_customers',JSON.stringify(customers));renderCustomerSelect()}
+function saveCustomerFromForm(){let name=$('cust').value.trim();if(!name)return;let i=customers.findIndex(c=>c.name.trim().toLowerCase()===name.toLowerCase());let c={name,taxid:$('taxid').value.trim(),addr:$('addr').value.trim()};if(i>=0)customers[i]=c;else customers.push(c);localStorage.setItem('easy_customers',JSON.stringify(customers));cloudSave();renderCustomerSelect()}
 function newCustomer(){show('create');$('custSelect').value='__new__';selectCustomer()}
 function editCustomer(i){let c=customers[i];if(!c)return;editingCustomerIndex=i;$('editCustName').value=c.name||'';$('editCustTax').value=c.taxid||'';$('editCustAddr').value=c.addr||'';$('customerModal').classList.add('open')}
 function closeCustomerModal(){editingCustomerIndex=null;$('customerModal').classList.remove('open')}
-function saveCustomerEdit(){if(editingCustomerIndex===null)return;let name=$('editCustName').value.trim();if(!name)return alert('กรุณากรอกชื่อลูกค้า / บริษัท');customers[editingCustomerIndex]={name,taxid:$('editCustTax').value.trim(),addr:$('editCustAddr').value.trim()};localStorage.setItem('easy_customers',JSON.stringify(customers));closeCustomerModal();render()}
+function saveCustomerEdit(){if(editingCustomerIndex===null)return;let name=$('editCustName').value.trim();if(!name)return alert('กรุณากรอกชื่อลูกค้า / บริษัท');customers[editingCustomerIndex]={name,taxid:$('editCustTax').value.trim(),addr:$('editCustAddr').value.trim()};localStorage.setItem('easy_customers',JSON.stringify(customers));cloudSave();closeCustomerModal();render()}
 function deleteCustomer(i){let c=customers[i];if(!c)return;deletingCustomerIndex=i;$('deleteCustomerText').textContent=`ต้องการลบ “${c.name}” ออกจากฐานลูกค้าหรือไม่?`;$('deleteModal').classList.add('open')}
 function closeDeleteModal(){deletingCustomerIndex=null;$('deleteModal').classList.remove('open')}
-function confirmDeleteCustomer(){if(deletingCustomerIndex===null)return;customers.splice(deletingCustomerIndex,1);localStorage.setItem('easy_customers',JSON.stringify(customers));closeDeleteModal();render()}
+function confirmDeleteCustomer(){if(deletingCustomerIndex===null)return;customers.splice(deletingCustomerIndex,1);localStorage.setItem('easy_customers',JSON.stringify(customers));cloudSave();closeDeleteModal();render()}
 
 
 
 function deleteDocument(i){let d=docs[i];if(!d)return;deletingDocIndex=i;$('deleteDocText').textContent=`ต้องการลบเอกสาร “${d.no}” หรือไม่?`;$('deleteDocModal').classList.add('open')}
 function closeDeleteDocModal(){deletingDocIndex=null;$('deleteDocModal').classList.remove('open')}
-function confirmDeleteDocument(){if(deletingDocIndex===null)return;docs.splice(deletingDocIndex,1);localStorage.setItem('easy_docs',JSON.stringify(docs));closeDeleteDocModal();render()}
+function confirmDeleteDocument(){if(deletingDocIndex===null)return;docs.splice(deletingDocIndex,1);localStorage.setItem('easy_docs',JSON.stringify(docs));cloudSave();closeDeleteDocModal();render()}
 
 function editDocument(i){let d=docs[i];if(!d)return;editingDocIndex=i;show('create');$('dtype').value=d.type||'QT';$('docno').value=d.no||'';$('date').value=d.date||'';$('credit').value=d.credit||'15 วัน';$('taxid').value=d.taxid||'';$('addr').value=d.addr||'';$('note').value=d.note||'';$('discount').value=d.dis||0;$('vat').value=String(d.vat||0);$('wht').value=String(d.wht||0);let ci=customers.findIndex(c=>c.name===d.cust);renderCustomerSelect();if(ci>=0){$('custSelect').style.display='block';$('newCustWrap').style.display='none';$('custSelect').value=String(ci);$('cust').value=d.cust||''}else{$('custSelect').style.display='none';$('newCustWrap').style.display='flex';$('cust').value=d.cust||''}$('itembody').innerHTML='';(d.items||[]).forEach(x=>addRow(x.desc,x.qty,x.price));if(!(d.items||[]).length)addRow();calc()}
 function currentDoc(){let c=calc();return {no:$('docno').value,type:$('dtype').value,cust:$('cust').value||'—',taxid:$('taxid').value,addr:$('addr').value,date:$('date').value,credit:$('credit').value,note:$('note').value,items:[...$('itembody').children].map(tr=>({desc:tr.querySelector('.desc').value,qty:+tr.querySelector('.qty').value,price:+tr.querySelector('.price').value})).filter(x=>x.desc),...c,vat:+$('vat').value,wht:+$('wht').value}}
@@ -61,9 +95,9 @@ function previewSaved(i){openPreview(docs[i])}
 function closePreview(){previewDoc=null;$('previewModal').classList.remove('open');document.body.classList.remove('print-preview')}
 function printPreview(){let d=previewDoc||currentDoc();printOldTitle=document.title;document.title=pdfFileName(d);document.body.classList.add('print-preview');window.print()}
 window.addEventListener('afterprint',()=>{document.body.classList.remove('print-preview');if(printOldTitle){document.title=printOldTitle;printOldTitle=''}});
-function saveSettings(){let old=JSON.parse(localStorage.getItem('easy_settings')||'{}');let s={biz:$('biz').value,biztax:$('biztax').value,bizaddr:$('bizaddr').value,bankname:$('bankname').value,accountname:$('accountname').value,accountno:$('accountno').value,signer:$('signer').value,logo:old.logo||''};localStorage.setItem('easy_settings',JSON.stringify(s));alert('บันทึกการตั้งค่าแล้ว')};function loadSettings(){let s=JSON.parse(localStorage.getItem('easy_settings')||'{}');Object.keys(s).forEach(k=>$(k)&&k!=='logo'&&($(k).value=s[k]));$('logoPreview').src=s.logo||'easy-smart-lock-logo.png'}
-function changeLogo(e){let f=e.target.files&&e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{let s=JSON.parse(localStorage.getItem('easy_settings')||'{}');s.logo=r.result;localStorage.setItem('easy_settings',JSON.stringify(s));$('logoPreview').src=r.result};r.readAsDataURL(f)}
-function resetLogo(){let s=JSON.parse(localStorage.getItem('easy_settings')||'{}');s.logo='';localStorage.setItem('easy_settings',JSON.stringify(s));$('logoPreview').src='easy-smart-lock-logo.png';$('logoFile').value=''}
+function saveSettings(){let old=JSON.parse(localStorage.getItem('easy_settings')||'{}');let s={biz:$('biz').value,biztax:$('biztax').value,bizaddr:$('bizaddr').value,bankname:$('bankname').value,accountname:$('accountname').value,accountno:$('accountno').value,signer:$('signer').value,logo:old.logo||''};localStorage.setItem('easy_settings',JSON.stringify(s));cloudSave();alert('บันทึกการตั้งค่าแล้ว')};function loadSettings(){let s=JSON.parse(localStorage.getItem('easy_settings')||'{}');Object.keys(s).forEach(k=>$(k)&&k!=='logo'&&($(k).value=s[k]));$('logoPreview').src=s.logo||'easy-smart-lock-logo.png'}
+function changeLogo(e){let f=e.target.files&&e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{let s=JSON.parse(localStorage.getItem('easy_settings')||'{}');s.logo=r.result;localStorage.setItem('easy_settings',JSON.stringify(s));cloudSave();$('logoPreview').src=r.result};r.readAsDataURL(f)}
+function resetLogo(){let s=JSON.parse(localStorage.getItem('easy_settings')||'{}');s.logo='';localStorage.setItem('easy_settings',JSON.stringify(s));cloudSave();$('logoPreview').src='easy-smart-lock-logo.png';$('logoFile').value=''}
 function exportBackup(){
   const backup={app:'EASY DOCS',version:'1.5.4',exportedAt:new Date().toISOString(),data:{
     easy_docs:JSON.parse(localStorage.getItem('easy_docs')||'[]'),
@@ -85,10 +119,10 @@ function importBackup(e){
       localStorage.setItem('easy_docs',JSON.stringify(data.easy_docs));
       localStorage.setItem('easy_customers',JSON.stringify(data.easy_customers));
       localStorage.setItem('easy_settings',JSON.stringify(data.easy_settings||{}));
-      location.reload();
+      docs=data.easy_docs;customers=data.easy_customers;cloudSaveNow().then(()=>location.reload()).catch(()=>location.reload());
     }catch(err){window.alert('ไฟล์สำรองไม่ถูกต้อง กรุณาเลือกไฟล์ที่ส่งออกจาก EASY DOCS');}
   };
   r.readAsText(file);e.target.value='';
 }
-$('date').value=new Date().toISOString().slice(0,10);loadSettings();addRow('ค่าบริการ',1,0);nextNo();render();renderCustomerSelect();
+$('date').value=new Date().toISOString().slice(0,10);loadSettings();addRow('ค่าบริการ',1,0);nextNo();render();renderCustomerSelect();cloudLoad();
 </script></body></html>
