@@ -23,7 +23,7 @@
 const $=id=>document.getElementById(id), money=n=>'฿'+Number(n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const SUPABASE_URL='https://dxlngxkuggbgdzmithzx.supabase.co';
 const SUPABASE_KEY='sb_publishable_sqAwuko-g-Kgzp51YyMT3g_gIAwtEan';
-const SB_HEADERS={'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'};
+const SB_HEADERS={'apikey':SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=minimal'};
 let cloudReady=false,cloudTimer=null;
 async function cloudLoad(){
   try{
@@ -51,7 +51,7 @@ async function cloudLoad(){
 async function cloudSaveNow(){
   const settings=JSON.parse(localStorage.getItem('easy_settings')||'{}');
   const r=await fetch(SUPABASE_URL+'/rest/v1/doc_app_state?id=eq.main',{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({docs,customers,settings,updated_at:new Date().toISOString()})});
-  if(!r.ok)throw new Error('cloud save '+r.status);
+  if(!r.ok){const t=await r.text();throw new Error('cloud save '+r.status+' '+t)}
 }
 function cloudSave(){clearTimeout(cloudTimer);cloudTimer=setTimeout(()=>cloudSaveNow().catch(console.error),120);}
 let docs=JSON.parse(localStorage.getItem('easy_docs')||'[]');let editingDocIndex=null;let editingCustomerIndex=null;let deletingCustomerIndex=null;let deletingDocIndex=null;let customers=JSON.parse(localStorage.getItem('easy_customers')||'[]');if(!customers.length){customers=[...new Map(docs.filter(x=>x.cust).map(x=>[x.cust,{name:x.cust,taxid:x.taxid||'',addr:x.addr||''}])).values()];localStorage.setItem('easy_customers',JSON.stringify(customers))}
@@ -107,7 +107,7 @@ async function uploadLocalToCloud(){
     cloudReady=true;
     if($('cloudStatus'))$('cloudStatus').textContent='ฐานกลาง: อัปโหลดสำเร็จ • เอกสาร '+docs.length+' รายการ • ลูกค้า '+customers.length+' ราย';
     alert('อัปโหลดข้อมูลขึ้นฐานกลางเรียบร้อยแล้ว');
-  }catch(e){console.error(e);if($('cloudStatus'))$('cloudStatus').textContent='ฐานกลาง: อัปโหลดไม่สำเร็จ';alert('อัปโหลดไม่สำเร็จ กรุณาลองใหม่')}
+  }catch(e){console.error(e);if($('cloudStatus'))$('cloudStatus').textContent='ฐานกลาง: อัปโหลดไม่สำเร็จ';alert('อัปโหลดไม่สำเร็จ: '+e.message)}
   finally{if(btn){btn.disabled=false;btn.textContent='↑ อัปโหลดข้อมูลเครื่องนี้ขึ้นฐานกลาง'}}
 }
 async function downloadCloudToLocal(){
